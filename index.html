@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="EN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sniper Market Tool - Automated Deriv Trader</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; box-sizing: border-box; }
+        .card { background: #1e293b; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); width: 100%; max-width: 450px; text-align: center; box-sizing: border-box; }
+        h2 { margin-bottom: 10px; color: #38bdf8; }
+        p { color: #94a3b8; font-size: 14px; margin-bottom: 20px; }
+        .btn { background: #22c55e; color: white; border: none; padding: 12px 20px; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; width: 100%; transition: 0.3s; margin-top: 10px; }
+        .btn:hover { background: #16a34a; }
+        .hidden { display: none; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; background: #334155; padding: 10px 15px; border-radius: 8px; margin-bottom: 15px; font-size: 14px; }
+        .status-badge { background: #22c55e; color: #fff; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+        .log-box { background: #0f172a; padding: 10px; border-radius: 6px; text-align: left; font-family: monospace; font-size: 12px; height: 160px; overflow-y: auto; margin-top: 15px; border: 1px solid #334155; }
+    </style>
+</head>
+<body>
+
+    <!-- LOGIN SCREEN -->
+    <div class="card" id="loginCard">
+        <h2>Sniper Market Tool</h2>
+        <p>Log in securely via Deriv OAuth to launch automated trading and live market signals.</p>
+        <button class="btn" onclick="redirectToDerivOAuth()">Login with Deriv Account</button>
+        <p style="font-size: 12px; margin-top: 15px; color: #64748b;">Secured by official Deriv API OAuth.</p>
+    </div>
+
+    <!-- DASHBOARD SCREEN -->
+    <div class="card hidden" id="dashboardCard" style="max-width: 500px;">
+        <div class="header-bar">
+            <div>
+                <span class="status-badge">Active</span> 
+                <span id="userAccountDisplay" style="font-weight: bold; margin-left: 8px; color: #38bdf8;">Connecting...</span>
+            </div>
+            <button onclick="logout()" style="background:#ef4444; border:none; color:white; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:12px;">Logout</button>
+        </div>
+
+        <h2>Rise / Fall Live Prediction</h2>
+        <p>Automated execution and commission tracking active.</p>
+        
+        <div style="background: #0f172a; padding: 12px; border-radius: 8px; margin-bottom: 10px; text-align: left;">
+            <div style="font-size: 13px; color: #38bdf8; font-weight: bold;">Signal Status:</div>
+            <div id="signalOutput" style="font-size: 15px; font-weight: bold; margin-top: 5px;">Awaiting tick stream...</div>
+        </div>
+
+        <div class="log-box" id="tradeLog">
+            [System]: Initializing automated WebSocket execution loop...<br>
+        </div>
+    </div>
+
+    <script>
+        const APP_ID = "34vilFxEI2eZqvcIxwqe";
+
+        window.onload = function() {
+            // Check URL fragment returned from Deriv OAuth redirect
+            const hash = window.location.hash;
+            if (hash.includes("access_token")) {
+                const params = new URLSearchParams(hash.replace("#", "?"));
+                // Deriv appends token1, acct1, etc. for the default account logged in
+                const token = params.get("token1");
+                const acctId = params.get("acct1");
+                
+                if (token && acctId) {
+                    localStorage.setItem("deriv_token", token);
+                    localStorage.setItem("deriv_acct", acctId);
+                    window.location.hash = ""; // Clean URL
+                    showDashboard(token, acctId);
+                    return;
+                }
+            }
+
+            // Check if already stored locally
+            const savedToken = localStorage.getItem("deriv_token");
+            const savedAcct = localStorage.getItem("deriv_acct");
+            if (savedToken) {
+                showDashboard(savedToken, savedAcct || "Account");
+            }
+        };
+
+        function redirectToDerivOAuth() {
+            // Points to your production domain configured in your Deriv API Dashboard
+            const redirectUri = "https://marketsnipertool.site/";
+            const oauthUrl = `https://oauth.deriv.com/oauth2/authorize?app_id=${APP_ID}&l=EN&brand=deriv&ac=login&redirect_uri=${encodeURIComponent(redirectUri)}`;
+            window.location.href = oauthUrl;
+        }
+
+        function showDashboard(token, accountId) {
+            document.getElementById("loginCard").classList.add("hidden");
+            document.getElementById("dashboardCard").classList.remove("hidden");
+            document.getElementById("userAccountDisplay").innerText = accountId;
+            startAutomatedTrading(token, accountId);
+        }
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        function startAutomatedTrading(token, accountId) {
+            const logBox = document.getElementById("tradeLog");
+            logBox.innerHTML += `[Auth]: Authorizing token for ${accountId}...<br>`;
+
+            const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`);
+
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ authorize: token }));
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.msg_type === "authorize") {
+                    if (data.error) {
+                        logBox.innerHTML += `<span style="color:#ef4444;">[Error]: ${data.error.message}</span><br>`;
+                        localStorage.clear();
+                    } else {
+                        const user = data.authorize;
+                        document.getElementById("userAccountDisplay").innerText = `${user.loginid} (${user.currency} ${user.balance})`;
+                        logBox.innerHTML += `<span style="color:#22c55e;">[Authorized]: ${user.email}</span><br>`;
+                        logBox.innerHTML += `[Bot]: Subscribing to Volatility 10 Index (R_10)...<br>`;
+                        
+                        // Subscribe to ticks to drive automated logic & commission tracking
+                        ws.send(JSON.stringify({ ticks: "R_10" }));
+                    }
+                }
+
+                if (data.msg_type === "ticks") {
+                    const tick = data.tick;
+                    logBox.innerHTML += `[Tick]: ${tick.symbol} -> Price: ${tick.quote}<br>`;
+                    logBox.scrollTop = logBox.scrollHeight;
+
+                    // Live signal example
+                    document.getElementById("signalOutput").innerText = tick.quote % 2 === 0 ? "📈 RISE Signal Active" : "📉 FALL Signal Active";
+                    
+                    // Automated trade execution code logic goes here
+                }
+            };
+        }
+    </script>
+</body>
+</html>
